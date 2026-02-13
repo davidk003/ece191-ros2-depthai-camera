@@ -88,7 +88,7 @@ class CameraPublisher(Node):
                 f"anti_banding_mode={self.anti_banding_mode})"
             )
         else:
-            self.get_logger().warn(
+            self.get_logger().warning(
                 "Node running without camera. "
                 "Will attempt to reconnect when camera becomes available."
             )
@@ -266,28 +266,28 @@ class CameraPublisher(Node):
             self.rgb_queue = self.device.getOutputQueue(name="rgb", maxSize=1, blocking=False)
             self.camera_connected = True
             self.get_logger().info("Camera reconnected successfully")
-        except RuntimeError:
-            # Silently fail - we'll try again next time
-            pass
+        except RuntimeError as e:
+            # Log at debug level to avoid cluttering logs during repeated attempts
+            self.get_logger().debug(f"Reconnection attempt failed: {e}")
 
     def _handle_camera_disconnect(self) -> None:
         """Handle camera disconnection by cleaning up resources."""
         if self.device is not None:
             try:
                 self.device.close()
-            except Exception:
-                pass
+            except (RuntimeError, AttributeError) as e:
+                self.get_logger().debug(f"Error closing device during disconnect: {e}")
             self.device = None
         self.rgb_queue = None
         self.camera_connected = False
-        self.get_logger().warn("Camera connection lost. Will attempt to reconnect...")
+        self.get_logger().warning("Camera connection lost. Will attempt to reconnect...")
 
     def destroy_node(self) -> bool:
         if hasattr(self, "device") and self.device is not None:
             try:
                 self.device.close()
-            except Exception as e:
-                self.get_logger().warn(f"Error closing device during cleanup: {e}")
+            except (RuntimeError, AttributeError) as e:
+                self.get_logger().warning(f"Error closing device during cleanup: {e}")
         return super().destroy_node()
 
 
