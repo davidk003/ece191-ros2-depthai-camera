@@ -62,16 +62,36 @@ class CameraPublisher(Node):
             fps=self.fps,
             anti_banding_mode_name=self.anti_banding_mode,
         )
-        self.device = dai.Device(self.pipeline)
-        self.rgb_queue = self.device.getOutputQueue(name="rgb", maxSize=1, blocking=False)
+
+        # Try to initialize the camera device
+        try:
+            self.device = dai.Device(self.pipeline)
+            self.rgb_queue = self.device.getOutputQueue(name="rgb", maxSize=1, blocking=False)
+            self.camera_connected = True
+            self.get_logger().info("Camera device initialized successfully")
+        except RuntimeError as e:
+            self.get_logger().error(f"Failed to initialize camera device: {e}")
+            self.get_logger().error(
+                "Camera not detected at startup. Please connect a DepthAI camera."
+            )
+            self.device = None
+            self.rgb_queue = None
+            self.camera_connected = False
 
         self.timer = self.create_timer(1.0 / self.fps, self.publish_rgb_frame)
-        self.get_logger().info(
-            f"Publishing RGB frames on {self.topic_name} as sensor_msgs/msg/Image "
-            f"at {self.width}x{self.height} @ {self.fps:.1f} FPS "
-            f"(qos_reliability={self.qos_reliability}, qos_depth={self.qos_depth}, "
-            f"anti_banding_mode={self.anti_banding_mode})"
-        )
+
+        if self.camera_connected:
+            self.get_logger().info(
+                f"Publishing RGB frames on {self.topic_name} as sensor_msgs/msg/Image "
+                f"at {self.width}x{self.height} @ {self.fps:.1f} FPS "
+                f"(qos_reliability={self.qos_reliability}, qos_depth={self.qos_depth}, "
+                f"anti_banding_mode={self.anti_banding_mode})"
+            )
+        else:
+            self.get_logger().warn(
+                "Node running without camera. "
+                "Will attempt to reconnect when camera becomes available."
+            )
 
     def _find_config_root(self) -> Optional[Path]:
         module_dir = Path(__file__).resolve().parent
@@ -213,25 +233,61 @@ class CameraPublisher(Node):
         return pipeline
 
     def publish_rgb_frame(self) -> None:
-        packet = self.rgb_queue.tryGet()
-        if packet is None:
+        # If camera is not connected, try to reconnect
+        if not self.camera_connected:
+            self._attempt_reconnect()
             return
 
-        frame = packet.getCvFrame()
-        msg = Image()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = self.frame_id
-        msg.height = frame.shape[0]
-        msg.width = frame.shape[1]
-        msg.encoding = "bgr8"
-        msg.is_bigendian = False
-        msg.step = frame.shape[1] * frame.shape[2]
-        msg.data = frame.tobytes()
-        self.publisher.publish(msg)
+        try:
+            packet = self.rgb_queue.tryGet()
+            if packet is None:
+                return
+
+            frame = packet.getCvFrame()
+            msg = Image()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = self.frame_id
+            msg.height = frame.shape[0]
+            msg.width = frame.shape[1]
+            msg.encoding = "bgr8"
+            msg.is_bigendian = False
+            msg.step = frame.shape[1] * frame.shape[2]
+            msg.data = frame.tobytes()
+            self.publisher.publish(msg)
+        except (RuntimeError, AttributeError) as e:
+            # Camera disconnected during operation
+            self.get_logger().error(f"Camera disconnected during operation: {e}")
+            self._handle_camera_disconnect()
+
+    def _attempt_reconnect(self) -> None:
+        """Attempt to reconnect to the camera device."""
+        try:
+            self.device = dai.Device(self.pipeline)
+            self.rgb_queue = self.device.getOutputQueue(name="rgb", maxSize=1, blocking=False)
+            self.camera_connected = True
+            self.get_logger().info("Camera reconnected successfully")
+        except RuntimeError:
+            # Silently fail - we'll try again next time
+            pass
+
+    def _handle_camera_disconnect(self) -> None:
+        """Handle camera disconnection by cleaning up resources."""
+        if self.device is not None:
+            try:
+                self.device.close()
+            except Exception:
+                pass
+            self.device = None
+        self.rgb_queue = None
+        self.camera_connected = False
+        self.get_logger().warn("Camera connection lost. Will attempt to reconnect...")
 
     def destroy_node(self) -> bool:
         if hasattr(self, "device") and self.device is not None:
-            self.device.close()
+            try:
+                self.device.close()
+            except Exception as e:
+                self.get_logger().warn(f"Error closing device during cleanup: {e}")
         return super().destroy_node()
 
 
