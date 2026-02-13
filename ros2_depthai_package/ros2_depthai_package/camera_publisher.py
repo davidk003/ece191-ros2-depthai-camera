@@ -72,7 +72,7 @@ class CameraPublisher(Node):
         if self._initialize_camera():
             self.get_logger().info("Camera device initialized successfully")
         else:
-            self.get_logger().error(
+            self.get_logger().warning(
                 "Camera not detected at startup. Please connect a DepthAI camera."
             )
 
