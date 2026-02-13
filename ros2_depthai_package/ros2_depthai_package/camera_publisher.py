@@ -64,19 +64,15 @@ class CameraPublisher(Node):
         )
 
         # Try to initialize the camera device
-        try:
-            self.device = dai.Device(self.pipeline)
-            self.rgb_queue = self.device.getOutputQueue(name="rgb", maxSize=1, blocking=False)
-            self.camera_connected = True
-            self.get_logger().info("Camera device initialized successfully")
-        except RuntimeError as e:
-            self.get_logger().error(f"Failed to initialize camera device: {e}")
+        self.camera_connected = False
+        self.device = None
+        self.rgb_queue = None
+        self.last_reconnect_attempt = 0.0
+        self.reconnect_interval = 2.0  # seconds between reconnection attempts
+        if not self._initialize_camera():
             self.get_logger().error(
                 "Camera not detected at startup. Please connect a DepthAI camera."
             )
-            self.device = None
-            self.rgb_queue = None
-            self.camera_connected = False
 
         self.timer = self.create_timer(1.0 / self.fps, self.publish_rgb_frame)
 
@@ -232,10 +228,32 @@ class CameraPublisher(Node):
 
         return pipeline
 
+    def _initialize_camera(self) -> bool:
+        """Initialize the camera device.
+
+        Returns:
+            True if initialization was successful, False otherwise.
+        """
+        try:
+            self.device = dai.Device(self.pipeline)
+            self.rgb_queue = self.device.getOutputQueue(name="rgb", maxSize=1, blocking=False)
+            self.camera_connected = True
+            self.get_logger().info("Camera device initialized successfully")
+            return True
+        except RuntimeError as e:
+            self.get_logger().error(f"Failed to initialize camera device: {e}")
+            self.device = None
+            self.rgb_queue = None
+            self.camera_connected = False
+            return False
+
     def publish_rgb_frame(self) -> None:
-        # If camera is not connected, try to reconnect
+        # If camera is not connected, try to reconnect with backoff
         if not self.camera_connected:
-            self._attempt_reconnect()
+            current_time = self.get_clock().now().nanoseconds / 1e9
+            if current_time - self.last_reconnect_attempt >= self.reconnect_interval:
+                self.last_reconnect_attempt = current_time
+                self._attempt_reconnect()
             return
 
         try:
@@ -261,14 +279,11 @@ class CameraPublisher(Node):
 
     def _attempt_reconnect(self) -> None:
         """Attempt to reconnect to the camera device."""
-        try:
-            self.device = dai.Device(self.pipeline)
-            self.rgb_queue = self.device.getOutputQueue(name="rgb", maxSize=1, blocking=False)
-            self.camera_connected = True
+        if self._initialize_camera():
             self.get_logger().info("Camera reconnected successfully")
-        except RuntimeError as e:
+        else:
             # Log at debug level to avoid cluttering logs during repeated attempts
-            self.get_logger().debug(f"Reconnection attempt failed: {e}")
+            self.get_logger().debug("Reconnection attempt failed")
 
     def _handle_camera_disconnect(self) -> None:
         """Handle camera disconnection by cleaning up resources."""
