@@ -1,6 +1,6 @@
 from setuptools import setup
 
-package_name = 'ros2-depthai-package'
+package_name = 'ros2_depthai_package'
 
 setup(
     name=package_name,
@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'camera-publisher = ros2-depthai-package.camera-publisher:main'
+            'camera_publisher = ros2_depthai_package.camera_publisher:main'
         ],
     },
 )
