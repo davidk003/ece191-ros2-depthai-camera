@@ -1,11 +1,12 @@
 from setuptools import setup
 
 package_name = 'ros2-depthai-camera-node'
+python_module_name = 'ros2_depthai_camera_node'
 
 setup(
     name=package_name,
     version='0.0.0',
-    packages=[package_name],
+    packages=[python_module_name],
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -20,6 +21,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'ros2-depthai-camera-node = ros2_depthai_camera_node.node:main',
         ],
     },
 )
