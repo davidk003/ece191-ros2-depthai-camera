@@ -1,25 +1,42 @@
 import sys
-from typing import Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import depthai as dai
 import rclpy
+import yaml
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 
+PACKAGE_NAME = "ros2_depthai_package"
+NODE_NAME = "camera_publisher"
+
+DEFAULT_PARAMETER_DEFAULTS: Dict[str, Any] = {
+    "topic_name": "/oak/rgb/image_raw",
+    "fps": 30.0,
+    "width": 640,
+    "height": 400,
+    "frame_id": "oak_rgb_camera_frame",
+    "anti_banding_mode": "mains_60_hz",
+    "qos_reliability": "reliable",
+    "qos_depth": 10,
+}
+
 
 class CameraPublisher(Node):
     def __init__(self) -> None:
-        super().__init__("camera_publisher")
+        super().__init__(NODE_NAME)
 
-        self.declare_parameter("topic_name", "/oak/rgb/image_raw")
-        self.declare_parameter("fps", 30.0)
-        self.declare_parameter("width", 640)
-        self.declare_parameter("height", 400)
-        self.declare_parameter("frame_id", "oak_rgb_camera_frame")
-        self.declare_parameter("anti_banding_mode", "mains_60_hz")
-        self.declare_parameter("qos_reliability", "reliable")
-        self.declare_parameter("qos_depth", 10)
+        startup_defaults = self._load_startup_defaults()
+        self.declare_parameter("topic_name", startup_defaults["topic_name"])
+        self.declare_parameter("fps", startup_defaults["fps"])
+        self.declare_parameter("width", startup_defaults["width"])
+        self.declare_parameter("height", startup_defaults["height"])
+        self.declare_parameter("frame_id", startup_defaults["frame_id"])
+        self.declare_parameter("anti_banding_mode", startup_defaults["anti_banding_mode"])
+        self.declare_parameter("qos_reliability", startup_defaults["qos_reliability"])
+        self.declare_parameter("qos_depth", startup_defaults["qos_depth"])
 
         self.topic_name = self.get_parameter("topic_name").get_parameter_value().string_value
         self.fps = self.get_parameter("fps").get_parameter_value().double_value
@@ -55,6 +72,89 @@ class CameraPublisher(Node):
             f"(qos_reliability={self.qos_reliability}, qos_depth={self.qos_depth}, "
             f"anti_banding_mode={self.anti_banding_mode})"
         )
+
+    def _find_config_root(self) -> Optional[Path]:
+        module_dir = Path(__file__).resolve().parent
+        candidate_dirs = [module_dir.parent / "config"]
+        candidate_dirs.extend(
+            ancestor / "share" / PACKAGE_NAME / "config" for ancestor in module_dir.parents
+        )
+
+        seen = set()
+        for candidate in candidate_dirs:
+            resolved = str(candidate.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if (candidate / "camera.yaml").exists() and (candidate / "qos.yaml").exists():
+                return candidate
+        return None
+
+    def _load_yaml_parameters(self, path: Path) -> Dict[str, Any]:
+        if not path.exists():
+            self.get_logger().warn(f"Missing config file: {path}")
+            return {}
+
+        with path.open("r", encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle) or {}
+
+        if not isinstance(loaded, dict):
+            raise ValueError(f"Config file must contain a mapping: {path}")
+
+        node_section = loaded.get(NODE_NAME, {})
+        if not isinstance(node_section, dict):
+            raise ValueError(f"Top-level '{NODE_NAME}' must map to a dictionary: {path}")
+
+        params = node_section.get("ros__parameters", {})
+        if not isinstance(params, dict):
+            raise ValueError(f"'ros__parameters' must be a dictionary in: {path}")
+
+        return params
+
+    def _load_startup_defaults(self) -> Dict[str, Any]:
+        defaults = dict(DEFAULT_PARAMETER_DEFAULTS)
+        config_root = self._find_config_root()
+        if config_root is None:
+            self.get_logger().warn(
+                "No package config directory found; using in-code parameter defaults."
+            )
+            return defaults
+
+        merged_parameters: Dict[str, Any] = {}
+        merged_parameters.update(self._load_yaml_parameters(config_root / "camera.yaml"))
+        merged_parameters.update(self._load_yaml_parameters(config_root / "qos.yaml"))
+
+        selected_profile = str(merged_parameters.get("profile", "default")).strip() or "default"
+        profile_path = config_root / "profiles" / f"{selected_profile}.yaml"
+        if not profile_path.exists() and selected_profile != "default":
+            self.get_logger().warn(
+                f"Profile '{selected_profile}' not found; falling back to profile 'default'."
+            )
+            selected_profile = "default"
+            profile_path = config_root / "profiles" / "default.yaml"
+        merged_parameters.update(self._load_yaml_parameters(profile_path))
+
+        known_parameter_names = set(DEFAULT_PARAMETER_DEFAULTS.keys())
+        defaults.update(
+            {
+                key: value
+                for key, value in merged_parameters.items()
+                if key in known_parameter_names
+            }
+        )
+        defaults["topic_name"] = str(defaults["topic_name"])
+        defaults["fps"] = float(defaults["fps"])
+        defaults["width"] = int(defaults["width"])
+        defaults["height"] = int(defaults["height"])
+        defaults["frame_id"] = str(defaults["frame_id"])
+        defaults["anti_banding_mode"] = str(defaults["anti_banding_mode"])
+        defaults["qos_reliability"] = str(defaults["qos_reliability"])
+        defaults["qos_depth"] = int(defaults["qos_depth"])
+
+        self.get_logger().info(
+            f"Loaded startup config from {config_root} (profile={selected_profile})"
+        )
+        return defaults
 
     def _validate_parameters(self) -> None:
         if not self.topic_name:

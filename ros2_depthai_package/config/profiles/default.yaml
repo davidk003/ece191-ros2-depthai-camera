@@ -1,0 +1,4 @@
+camera_publisher:
+  ros__parameters:
+    qos_reliability: reliable
+    qos_depth: 10
