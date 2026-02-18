@@ -14,12 +14,6 @@ config_files = sorted(glob('config/*.yaml'))
 if config_files:
     data_files.append(('share/' + package_name + '/config', config_files))
 
-profile_files = sorted(glob('config/profiles/*.yaml'))
-if profile_files:
-    data_files.append(
-        ('share/' + package_name + '/config/profiles', profile_files)
-    )
-
 launch_files = sorted(glob('launch/*.launch.py'))
 if launch_files:
     data_files.append(('share/' + package_name + '/launch', launch_files))

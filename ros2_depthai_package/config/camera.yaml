@@ -1,9 +1,10 @@
 camera_publisher:
   ros__parameters:
-    profile: default
     topic_name: /oak/rgb/image_raw
     fps: 30.0
     width: 640
     height: 400
     frame_id: oak_rgb_camera_frame
     anti_banding_mode: mains_60_hz
+    qos_reliability: reliable
+    qos_depth: 10

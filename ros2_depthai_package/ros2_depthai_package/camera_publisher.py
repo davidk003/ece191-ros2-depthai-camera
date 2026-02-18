@@ -104,7 +104,7 @@ class CameraPublisher(Node):
             if resolved in seen:
                 continue
             seen.add(resolved)
-            if (candidate / "camera.yaml").exists() and (candidate / "qos.yaml").exists():
+            if (candidate / "camera.yaml").exists():
                 return candidate
         return None
 
@@ -140,17 +140,6 @@ class CameraPublisher(Node):
 
         merged_parameters: Dict[str, Any] = {}
         merged_parameters.update(self._load_yaml_parameters(config_root / "camera.yaml"))
-        merged_parameters.update(self._load_yaml_parameters(config_root / "qos.yaml"))
-
-        selected_profile = str(merged_parameters.get("profile", "default")).strip() or "default"
-        profile_path = config_root / "profiles" / f"{selected_profile}.yaml"
-        if not profile_path.exists() and selected_profile != "default":
-            self.get_logger().warn(
-                f"Profile '{selected_profile}' not found; falling back to profile 'default'."
-            )
-            selected_profile = "default"
-            profile_path = config_root / "profiles" / "default.yaml"
-        merged_parameters.update(self._load_yaml_parameters(profile_path))
 
         known_parameter_names = set(DEFAULT_PARAMETER_DEFAULTS.keys())
         defaults.update(
@@ -169,9 +158,7 @@ class CameraPublisher(Node):
         defaults["qos_reliability"] = str(defaults["qos_reliability"])
         defaults["qos_depth"] = int(defaults["qos_depth"])
 
-        self.get_logger().info(
-            f"Loaded startup config from {config_root} (profile={selected_profile})"
-        )
+        self.get_logger().info(f"Loaded startup config from {config_root}")
         return defaults
 
     def _validate_parameters(self) -> None:
